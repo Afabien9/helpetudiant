@@ -1,0 +1,14 @@
+{
+  "name": "entraide-etudiants",
+  "version": "1.0.0",
+  "description": "Plateforme d'entraide entre étudiants d'une école : demandes d'aide, séances, messagerie.",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.js",
+    "seed": "node scripts/seed-demo.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

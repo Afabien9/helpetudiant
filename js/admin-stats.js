@@ -1,33 +1,6 @@
 "use strict";
 
-requireUser({ admin: true });
-
-/* ---------- Données (comptes et demandes : navigateur ; messages : serveur) ---------- */
-const subjectOf = (r) => r.subject.split(" – ")[0];
-
-function collect() {
-  const requests = state.requests;
-  const open = requests.filter((r) => r.status !== "done").length;
-  const done = requests.length - open;
-
-  const bySubject = state.subjects
-    .map((s) => ({ label: s.name, value: requests.filter((r) => subjectOf(r) === s.name).length, archived: s.archived }))
-    .filter((d) => !d.archived || d.value > 0);
-
-  const byYear = ALL_LEVELS.map((l) => ({ label: l, value: state.users.filter((u) => u.year === l).length }));
-
-  const statusCount = (key) => requests.filter((r) => r.status === key).length;
-  return {
-    activeUsers: state.users.filter((u) => u.status === "active").length,
-    totalUsers: state.users.length,
-    open, done, total: requests.length,
-    rate: requests.length ? Math.round((done / requests.length) * 100) : 0,
-    upcoming: upcomingSessions().length,
-    past: pastSessions().length,
-    bySubject, byYear,
-    requestStatus: ["open", "wait", "prop", "done"].map((k) => ({ key: k, value: statusCount(k) }))
-  };
-}
+/* Statistiques (admin uniquement) : chiffres calculés par le serveur sur les vraies données. */
 
 /* ---------- Tooltip partagé ---------- */
 const tip = document.createElement("div");
@@ -173,38 +146,34 @@ document.addEventListener("mousemove", (e) => {
   tip.hidden = false;
 });
 
-function render(serverStats) {
-  const d = collect();
-  const ratePlural = (n, w) => `${n} ${w}${n > 1 ? "s" : ""}`;
+function render(stats) {
+  const { users, requests, seances, messages } = stats;
+  const plural = (n, w) => `${n} ${w}${n > 1 ? "s" : ""}`;
+  const statusOrder = ["open", "wait", "prop", "confirmed", "done"];
   mountShell("admin-stats", `
     <div class="viz-root">
       <h1>Statistiques</h1>
       <div class="kpis">
-        <div class="kpi"><div class="v">${d.activeUsers}</div><div class="l">Comptes actifs</div><div class="s">sur ${d.totalUsers} comptes</div></div>
-        <div class="kpi"><div class="v">${d.open}</div><div class="l">Demandes en cours</div><div class="s">${ratePlural(d.total, "demande")} au total</div></div>
-        <div class="kpi"><div class="v">${d.rate} %</div><div class="l">Demandes résolues</div><div class="s">${d.done} sur ${d.total}</div></div>
-        <div class="kpi"><div class="v">${d.upcoming}</div><div class="l">Séances à venir</div><div class="s">${d.past} passée${d.past > 1 ? "s" : ""}</div></div>
+        <div class="kpi"><div class="v">${users.active}</div><div class="l">Comptes actifs</div><div class="s">sur ${plural(users.total, "compte")}${users.pending ? ` · ${users.pending} en attente` : ""}</div></div>
+        <div class="kpi"><div class="v">${requests.inProgress}</div><div class="l">Demandes en cours</div><div class="s">${plural(requests.total, "demande")} au total</div></div>
+        <div class="kpi"><div class="v">${requests.rate} %</div><div class="l">Demandes résolues</div><div class="s">${requests.done} sur ${requests.total}</div></div>
+        <div class="kpi"><div class="v">${seances.upcoming}</div><div class="l">Séances à venir</div><div class="s">${plural(seances.past, "séance")} passée${seances.past > 1 ? "s" : ""}</div></div>
       </div>
       <div class="chart-grid">
         ${card("cSubject", "Demandes par matière", "Nombre de demandes déposées", false)}
         ${card("cYear", "Utilisateurs par année", "Répartition des comptes", false)}
-        ${card("cMsg", "Messages envoyés par jour", serverStats ? `${serverStats.messages} messages · ${serverStats.conversations} discussion${serverStats.conversations > 1 ? "s" : ""} · 14 derniers jours` : "14 derniers jours", true)}
+        ${card("cMsg", "Messages envoyés par jour", `${plural(messages.total, "message")} · ${plural(messages.conversations, "discussion")} · 14 derniers jours`, true)}
         <section class="chart-card wide">
           <div class="chart-head"><div><h2>Demandes par statut</h2><div class="hint">État actuel de toutes les demandes</div></div></div>
-          <div class="status-list">${d.requestStatus.map((s) => `<span>${badge(s.key)} <b>${s.value}</b></span>`).join("")}</div>
+          <div class="status-list">${statusOrder.map((k) => `<span>${badge(k)} <b>${requests.byStatus[k]}</b></span>`).join("")}</div>
         </section>
       </div>
     </div>`);
 
-  fillCard("cSubject", hBars(d.bySubject, "demande(s)"), tableOf(d.bySubject, "Matière", "Demandes"));
-  fillCard("cYear", vBars(d.byYear, "compte(s)"), tableOf(d.byYear, "Année", "Comptes"));
+  fillCard("cSubject", hBars(requests.bySubject, "demande(s)"), tableOf(requests.bySubject, "Matière", "Demandes"));
+  fillCard("cYear", vBars(users.byYear, "compte(s)"), tableOf(users.byYear, "Année", "Comptes"));
 
-  if (!serverStats) {
-    $("#cMsg .chart-body").innerHTML = `<p class="empty">Statistiques de messagerie indisponibles : lancez <code>node server.js</code>.</p>`;
-    $("#cMsg button").hidden = true;
-    return;
-  }
-  const data = serverStats.messagesPerDay.map((m) => {
+  const data = messages.perDay.map((m) => {
     const dt = new Date(m.day + "T12:00");
     return { label: dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
              full: dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), value: m.count };
@@ -215,11 +184,6 @@ function render(serverStats) {
 }
 
 (async () => {
-  let stats = null;
-  try { stats = await (await fetch("/api/stats")).json(); } catch { /* serveur absent */ }
-  if (!state.user.admin) {
-    mountShell("accueil", '<h1>Statistiques</h1><p class="empty card">Accès réservé aux administrateurs.</p>');
-    return;
-  }
-  render(stats);
+  await requireUser({ admin: true });
+  try { render(await get("/api/admin/stats")); } catch (e) { mountShell("admin-stats", `<h1>Statistiques</h1><p class="empty card">${esc(e.message)}</p>`); }
 })();

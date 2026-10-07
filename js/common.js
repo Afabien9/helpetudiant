@@ -1,15 +1,14 @@
 "use strict";
 
 /* =====================================================================
-   Socle commun à toutes les pages : données, utilitaires, gabarits
-   partagés (barre latérale, champs mot de passe) et menu de démo.
+   Socle commun à toutes les pages : appels à l'API, session, gabarits
+   partagés (barre latérale, champs mot de passe) et petits utilitaires.
    ===================================================================== */
 
 const SCHOOL_DOMAIN = "ecole.fr";
 const MIN_PASSWORD = 12;
-const MAX_ATTEMPTS = 5;
-const LOCK_MINUTES = 15;
 const ALL_LEVELS = ["L1", "L2", "L3", "M1", "M2"];
+const PLACES = ["En ligne ou salle", "En ligne", "Salle B12", "Salle C3", "Bibliothèque", "Lien visio"];
 
 /* ---------- Icônes (style "feather") ---------- */
 const ICONS = {
@@ -26,6 +25,7 @@ const ICONS = {
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   check: '<path d="m4 12 5 5L20 6"/>',
   right: '<path d="m9 6 6 6-6 6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   pin: '<path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
   shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -37,193 +37,155 @@ const ICONS = {
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
-/* ---------- Données fictives, conservées dans localStorage ---------- */
-const STORAGE_KEY = "entraide-etudiants-v2";
-
-const daysFromNow = (d, h, m = 0) => {
-  const date = new Date();
-  date.setDate(date.getDate() + d);
-  date.setHours(h, m, 0, 0);
-  return date.toISOString();
-};
-
-function seed() {
-  return {
-    user: null,            // { name, initials, year, field, subjects, admin, email }
-    attempts: 0,
-    lockedUntil: 0,
-    subjects: [
-      { name: "Mathématiques", archived: false },
-      { name: "Physique", archived: false },
-      { name: "Informatique", archived: false },
-      { name: "Chimie", archived: true }
-    ],
-    requests: [
-      { id: 1, subject: "Mathématiques – L2", topic: "Analyse, exercices", status: "open", date: "2025-04-10", place: "En ligne ou salle",
-        desc: "Je bloque sur l'exercice 3 du chapitre 4 (suites et séries numériques).",
-        proposals: [
-          { name: "Marc Petit", initials: "MP", info: "L3 Mathématiques" },
-          { name: "Alice Lefèvre", initials: "AL", info: "L3 Physique" }
-        ] },
-      { id: 2, subject: "Physique – L2", topic: "Mécanique", status: "wait", date: "2025-04-12", place: "Salle B12",
-        desc: "Besoin d'aide sur les référentiels non galiléens.", proposals: [] },
-      { id: 3, subject: "Informatique – L1", topic: "Programmation", status: "prop", date: "2025-04-14", place: "En ligne",
-        desc: "Compréhension des boucles et des fonctions en Python.",
-        proposals: [{ name: "Thomas Martin", initials: "TM", info: "M1 Informatique" }] }
-    ],
-    propositions: [
-      { id: 11, subject: "Chimie – L1", topic: "Chimie organique", status: "wait" },
-      { id: 12, subject: "Mathématiques – L1", topic: "Algèbre linéaire", status: "prop" }
-    ],
-    sessions: [
-      { id: 1, subject: "Mathématiques – L2", when: daysFromNow(3, 14), place: "Salle B12", status: "confirmed" },
-      { id: 2, subject: "Physique – L1", when: daysFromNow(5, 10), place: "Lien visio", status: "wait" },
-      { id: 3, subject: "Informatique – L1", when: daysFromNow(9, 16), place: "Salle C3", status: "confirmed" },
-      { id: 4, subject: "Chimie – L1", when: daysFromNow(-4, 11), place: "Salle A1", status: "confirmed" }
-    ]
-  };
-}
-
-const SESSION_KEY = "entraide-etudiants-session";
-
-let state = (() => {
-  let data = seed();
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) data = JSON.parse(raw);
-  } catch { /* stockage indisponible : on repart des données de démo */ }
-  // La session est propre à chaque onglet : on peut ouvrir deux comptes en parallèle.
-  try { data.user = JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch { data.user = null; }
-  return data;
-})();
-
-/** Comptes de l'école visibles dans l'administration (données de démo). */
-function seedUsers() {
-  const u = (name, year, subjects, status = "active", admin = false) => ({
-    id: name.toLowerCase().replace(/\s+/g, "."), name, email: `${name.toLowerCase().replace(/\s+/g, ".")}@${SCHOOL_DOMAIN}`,
-    year, subjects, status, admin, joined: daysFromNow(-Math.floor(Math.random() * 200) - 10, 12)
-  });
-  return [
-    u("Julie Dupont", "L3", ["Mathématiques", "Physique", "Informatique"]),
-    u("Marc Petit", "L3", ["Mathématiques"]),
-    u("Alice Lefèvre", "L3", ["Physique"]),
-    u("Thomas Martin", "M1", ["Informatique", "Mathématiques"]),
-    u("Sophie Bernard", "L2", [], "pending"),
-    u("Lucas Moreau", "L1", ["Chimie"], "suspended"),
-    u("Admin Principal", "M2", [], "active", true)
-  ];
-}
-if (!state.users) state.users = seedUsers();
-
-/** Ajoute le compte à la liste (à la connexion) s'il n'y figure pas encore. */
-function registerUser(u) {
-  if (state.users.some((x) => x.email.toLowerCase() === u.email.toLowerCase())) return;
-  state.users.push({ id: u.email, name: u.name, email: u.email, year: u.year, subjects: u.subjects,
-    status: "active", admin: u.admin, joined: new Date().toISOString() });
-}
-
-function save() {
-  try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(state.user));
-    const { user, ...shared } = state;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(shared));
-  } catch { /* ignoré */ }
-}
-
-/** Déclare le compte au serveur de messagerie pour qu'il apparaisse dans l'annuaire. */
-function registerOnServer(u) {
-  return fetch("/api/register", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: u.email, name: u.name, initials: u.initials })
-  }).catch(() => { /* serveur de messagerie absent */ });
-}
-
-function resetDemo() {
-  state = seed();
-  save();
-}
-
 /* ---------- Utilitaires ---------- */
 const STATUS = {
-  open: ["Ouverte", "open"], wait: ["En attente", "wait"], prop: ["Proposée", "prop"],
-  done: ["Résolue", "done"], confirmed: ["Confirmée", "green"]
+  open: ["Ouverte", "open"], wait: ["En attente", "wait"], prop: ["Proposée", "prop"], done: ["Résolue", "done"],
+  confirmed: ["Confirmée", "green"], declined: ["Pourvue", "grey"], expired: ["Expirée", "grey"], tobe: ["À confirmer", "orange"]
 };
 const $ = (sel, root = document) => root.querySelector(sel);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const badge = (key) => `<span class="badge ${STATUS[key][1]}">${STATUS[key][0]}</span>`;
 const fmtDate = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 const fmtTime = (d) => new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", "h");
-const fmtDay = (iso) => new Date(iso + "T12:00").toLocaleDateString("fr-FR");
-const isSchoolEmail = (e) => new RegExp(`^[^@\\s]+@${SCHOOL_DOMAIN.replace(".", "\\.")}$`, "i").test(e.trim());
 const queryParam = (name) => new URLSearchParams(location.search).get(name);
 const showErr = (id, msg) => { const el = $("#" + id); el.textContent = msg; el.hidden = !msg; };
+const showOk = (id, msg) => showErr(id, msg);
+const byDate = (key) => (a, b) => new Date(a[key]) - new Date(b[key]);
 
+let toastTimer;
 function toast(msg) {
   document.querySelectorAll(".toast").forEach((t) => t.remove());
+  clearTimeout(toastTimer);
   const el = document.createElement("div");
   el.className = "toast";
+  el.setAttribute("role", "status");
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2800);
+  toastTimer = setTimeout(() => el.remove(), 3000);
 }
 
-function nameFromEmail(email) {
-  const [first = "Prénom", last = "Nom"] = email.split("@")[0].split(".");
-  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  return { name: `${cap(first)} ${cap(last)}`, initials: (first[0] + (last[0] || "")).toUpperCase() };
+/* ---------- Appels à l'API ---------- */
+async function api(method, url, body) {
+  let res;
+  try {
+    res = await fetch(url, {
+      method, credentials: "same-origin",
+      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+      body: body !== undefined ? JSON.stringify(body) : undefined
+    });
+  } catch {
+    const err = new Error("Le serveur est injoignable. Lancez « node server.js » dans le dossier du projet.");
+    err.status = 0;
+    throw err;
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* corps vide */ }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || "Une erreur est survenue.");
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+const get = (url) => api("GET", url);
+const post = (url, body = {}) => api("POST", url, body);
+const patch = (url, body) => api("PATCH", url, body);
+const del = (url) => api("DELETE", url);
+
+/** Exécute une action et affiche l'erreur éventuelle dans un toast. */
+async function attempt(fn) {
+  try { return await fn(); } catch (e) { toast(e.message); return undefined; }
 }
 
-const upcomingSessions = () => state.sessions.filter((s) => new Date(s.when) >= new Date()).sort((a, b) => new Date(a.when) - new Date(b.when));
-const pastSessions = () => state.sessions.filter((s) => new Date(s.when) < new Date()).sort((a, b) => new Date(b.when) - new Date(a.when));
+/* ---------- Session ---------- */
+let me = null;
 
-const sessionItem = (s) => `
-  <div class="item">
-    <div class="ico">${icon("cap")}</div>
-    <div class="body"><div class="title">${esc(s.subject)}</div>
-      <div class="meta">${fmtDate(s.when)} · ${fmtTime(s.when)}<br>${esc(s.place)}</div></div>
-    ${badge(s.status)}
-  </div>`;
+const forever = () => new Promise(() => {});   // suspend le script de la page (redirection en cours)
+
+/** Charge l'utilisateur connecté. Sans session, renvoie vers la page de connexion. */
+async function requireUser({ admin = false, student = false } = {}) {
+  try {
+    me = await get("/api/me");
+  } catch (e) {
+    if (e.status === 401) {
+      const here = location.pathname.split("/").pop() + location.search;
+      location.replace(`connexion.html?next=${encodeURIComponent(here)}`);
+      return forever();
+    }
+    $("#app").innerHTML = `<div class="auth-page"><div class="auth-card"><h1>Serveur injoignable</h1><p class="sub">${esc(e.message)}</p></div></div>`;
+    return forever();
+  }
+  if (student && me.role === "admin") { location.replace("admin.html"); return forever(); }
+  if (admin && me.role !== "admin") {
+    mountShell("accueil", '<h1>Accès refusé</h1><p class="empty card">Cette page est réservée aux administrateurs.</p>');
+    return forever();
+  }
+  return me;
+}
+
+/** Redirige l'utilisateur déjà connecté (pages de connexion / inscription). */
+async function redirectIfLoggedIn() {
+  try {
+    const user = await get("/api/me");
+    location.replace(user.role === "admin" ? "admin.html" : "accueil.html");
+    return forever();
+  } catch { /* pas connecté : on reste */ }
+}
+
+const safeNext = (value) => (/^[\w-]+\.html(\?[\w=&%.-]*)?$/.test(value || "") ? value : null);
 
 /* ---------- Gabarits partagés ---------- */
-const passwordField = (id, placeholder = "") => `
+const passwordField = (id, placeholder = "", autocomplete = "current-password") => `
   <div class="pw-wrap">
-    <input class="input" id="${id}" type="password" placeholder="${placeholder}" autocomplete="off" required>
+    <input class="input" id="${id}" type="password" placeholder="${placeholder}" autocomplete="${autocomplete}" required>
     <button type="button" class="pw-toggle" data-action="toggle-pw" data-target="${id}" aria-label="Afficher le mot de passe">${icon("eye")}</button>
   </div>`;
 
-/** Page privée : sans session on connecte l'utilisateur fictif (mode démo). */
-function requireUser({ admin = false } = {}) {
-  if (!state.user) {
-    state.user = { name: "Julie Dupont", initials: "JD", year: "L3", field: "Informatique",
-      email: `julie.dupont@${SCHOOL_DOMAIN}`, subjects: ["Mathématiques", "Physique", "Informatique"], admin };
-    save();
-  }
-  return state.user;
-}
+const authFooter = `
+  <p class="auth-links"><a href="regles.html">Règles d'accès</a> · <a href="boite-mail.html">Boîte mail de démo</a></p>`;
 
-/** Affiche la barre latérale + le contenu dans #app. */
+/** Barre latérale + contenu dans #app. */
 function mountShell(active, content) {
   const link = (href, ico, label, key) =>
-    `<a href="${href}" class="${active === key ? "active" : ""}">${icon(ico)} ${label}</a>`;
-  const nav = state.user.admin
+    `<a href="${href}" class="${active === key ? "active" : ""}" ${active === key ? 'aria-current="page"' : ""}>${icon(ico)} ${label}</a>`;
+  const nav = me.role === "admin"
     ? link("admin.html", "home", "Administration", "admin") +
       link("admin-utilisateurs.html", "users", "Utilisateurs", "admin-utilisateurs") +
-      link("admin-stats.html", "chart", "Statistiques", "admin-stats")
+      link("admin-stats.html", "chart", "Statistiques", "admin-stats") +
+      link("messages.html", "chat", "Messagerie", "messages") +
+      link("profil.html", "user", "Mon profil", "profil")
     : link("accueil.html", "home", "Accueil", "accueil") +
       link("profil.html", "user", "Mon profil", "profil") +
-      link("accueil.html?tab=demandes", "list", "Mes demandes", "demandes") +
-      link("accueil.html?tab=propositions", "hand", "Mes propositions", "propositions") +
+      link("espaces.html?tab=demandes", "list", "Mes demandes", "demandes") +
+      link("espaces.html?tab=propositions", "hand", "Mes propositions", "propositions") +
       link("seances.html", "cal", "Mes séances", "seances") +
       link("messages.html", "chat", "Messagerie", "messages");
   $("#app").innerHTML = `
     <div class="shell">
       <aside class="sidebar">
         <div class="brand">${icon("cap")} Entraide Étudiants</div>
-        <nav>${nav}</nav>
-        <button class="nav-link logout" data-action="logout">${icon("out")} Déconnexion</button>
+        <nav aria-label="Navigation principale">${nav}</nav>
+        <div class="side-foot">
+          <a class="who" href="profil.html"><span class="avatar sm">${esc(me.initials)}</span><span>${esc(me.name)}</span></a>
+          <a href="regles.html" class="side-link">${icon("shield")} Règles d'accès</a>
+          <button class="nav-link logout" data-action="logout">${icon("out")} Déconnexion</button>
+        </div>
       </aside>
       <main class="main">${content}</main>
     </div>`;
+}
+
+/** Une ligne de séance (écran 9) ; `actions` ajoute des boutons à droite. */
+function seanceItem(s, extra = "") {
+  const key = s.mustConfirm ? "tobe" : s.status;
+  return `
+  <div class="item">
+    <div class="ico">${icon("cap")}</div>
+    <div class="body"><div class="title">${esc(s.subject)}</div>
+      <div class="meta">${fmtDate(s.when)} · ${fmtTime(s.when)} · ${esc(s.place)}<br>
+        avec <a href="messages.html?to=${encodeURIComponent(s.other.email)}">${esc(s.other.name)}</a></div></div>
+    ${badge(key)}${extra}
+  </div>`;
 }
 
 /* ---------- Gestion des événements (délégation) ---------- */
@@ -248,20 +210,20 @@ actions["toggle-pw"] = (t) => {
   const input = $("#" + t.dataset.target);
   input.type = input.type === "password" ? "text" : "password";
 };
-actions.logout = () => {
-  state.user = null;
-  save();
+actions.logout = async () => {
+  await attempt(() => post("/api/auth/logout"));
   location.href = "connexion.html";
 };
 
-/* ---------- Boîte de dialogue (écran d'administration) ---------- */
-function openDialog(title, value, onValidate, onDone) {
+/* ---------- Boîte de dialogue (administration) ----------
+   onSubmit(valeur) renvoie une promesse : lève une erreur pour l'afficher dans la boîte. */
+function openDialog(title, value, onSubmit, { placeholder = "", type = "text" } = {}) {
   let dlg = $("#dialog");
   if (!dlg) {
     document.body.insertAdjacentHTML("beforeend", `
       <dialog id="dialog"><form method="dialog" id="dialogForm">
         <h3 id="dialogTitle"></h3>
-        <input type="text" id="dialogInput" class="input" maxlength="60" required>
+        <input id="dialogInput" class="input" maxlength="120" required>
         <p class="field-error" id="dialogError" hidden></p>
         <div class="dialog-actions">
           <button type="button" class="btn btn-outline" id="dialogCancel">Annuler</button>
@@ -273,43 +235,22 @@ function openDialog(title, value, onValidate, onDone) {
   }
   const input = $("#dialogInput"), err = $("#dialogError");
   $("#dialogTitle").textContent = title;
+  input.type = type;
+  input.placeholder = placeholder;
   input.value = value;
   err.hidden = true;
-  dlg.onsubmit = (ev) => {
+  dlg.onsubmit = async (ev) => {
     ev.preventDefault();
-    const name = input.value.trim();
-    if (!name) return;
-    const problem = onValidate(name);
-    if (problem) { err.textContent = problem; err.hidden = false; return; }
-    save();
-    dlg.close();
-    toast("Enregistré.");
-    onDone();
+    const entered = input.value.trim();
+    if (!entered) return;
+    try {
+      await onSubmit(entered);
+      dlg.close();
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    }
   };
   dlg.showModal();
   input.focus();
 }
-
-/* ---------- Menu de navigation de la maquette ---------- */
-const DEMO_SCREENS = [
-  ["inscription", "1. Inscription"], ["confirmation", "2. Confirmation e-mail"], ["connexion", "3. Connexion"],
-  ["oubli", "4. Mot de passe oublié"], ["profil", "5. Profil étudiant"], ["accueil", "6. Tableau de bord"],
-  ["demande?id=1", "7. Détail d'une demande"], ["seance?id=1", "8. Proposer une séance"], ["seances", "9. Mes séances"],
-  ["notification", "10. Notification e-mail"], ["admin", "11. Administration"], ["messages", "12. Messagerie"],
-  ["regles", "13. Règles d'accès"]
-];
-
-document.body.insertAdjacentHTML("beforeend", `
-  <nav class="demo-nav" aria-label="Écrans de la maquette">
-    <button class="demo-toggle" id="demoToggle" type="button">Écrans ▾</button>
-    <ul id="demoList" hidden>
-      ${DEMO_SCREENS.map(([h, l]) => `<li><a href="${h.replace("?", ".html?").replace(/^([a-z-]+)$/, "$1.html")}">${l}</a></li>`).join("")}
-      <li><a href="#" id="demoReset">↺ Réinitialiser les données</a></li>
-    </ul>
-  </nav>`);
-$("#demoToggle").addEventListener("click", () => { const l = $("#demoList"); l.hidden = !l.hidden; });
-$("#demoReset").addEventListener("click", (e) => {
-  e.preventDefault();
-  resetDemo();
-  location.href = "connexion.html";
-});

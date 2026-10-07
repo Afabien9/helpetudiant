@@ -1,54 +1,54 @@
 "use strict";
 
-requireUser({ admin: true });
+/* Écran 11 : administration des matières (admin uniquement). */
 
-const nameTaken = (name, except) =>
-  state.subjects.some((s) => s !== except && s.name.toLowerCase() === name.toLowerCase());
+(async () => {
+  await requireUser({ admin: true });
+  let subjects = [];
 
-function render() {
-  if (!state.user.admin) {
-    mountShell("accueil", '<h1>Administration</h1><p class="empty card">Accès réservé aux administrateurs.</p>');
-    return;
+  function render() {
+    const rows = subjects.map((s) => `
+      <tr class="${s.archived ? "archived" : ""}">
+        <td>${esc(s.name)}</td>
+        <td><span class="badge ${s.archived ? "grey" : "green"}">${s.archived ? "Archivée" : "Active"}</span></td>
+        <td class="hint">${s.requests}</td>
+        <td class="actions">
+          <button class="btn btn-outline btn-sm" data-action="rename-subject" data-id="${s.id}">Renommer</button>
+          <button class="btn btn-outline btn-sm" data-action="toggle-archive" data-id="${s.id}">${s.archived ? "Restaurer" : "Archiver"}</button>
+        </td>
+      </tr>`).join("");
+    mountShell("admin", `
+      <div class="page-head"><h1>Gestion des matières</h1>
+        <button class="btn btn-primary btn-sm" data-action="add-subject-admin">+ Ajouter une matière</button></div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Nom</th><th>Statut</th><th>Demandes</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="hint" style="margin-top:14px">Accès réservé aux administrateurs. Une matière archivée n'est plus proposée mais reste sur les anciennes demandes. Deux matières ne peuvent pas avoir le même nom.</p>`);
   }
-  const rows = state.subjects.map((s, i) => `
-    <tr class="${s.archived ? "archived" : ""}">
-      <td>${esc(s.name)}</td>
-      <td><span class="badge ${s.archived ? "grey" : "green"}">${s.archived ? "Archivée" : "Active"}</span></td>
-      <td class="actions">
-        <button class="btn btn-outline btn-sm" data-action="rename-subject" data-i="${i}">Renommer</button>
-        <button class="btn btn-outline btn-sm" data-action="toggle-archive" data-i="${i}">${s.archived ? "Restaurer" : "Archiver"}</button>
-      </td>
-    </tr>`).join("");
-  mountShell("admin", `
-    <div class="page-head"><h1>Gestion des matières</h1>
-      <button class="btn btn-primary btn-sm" data-action="add-subject-admin">+ Ajouter une matière</button></div>
-    <table class="table"><thead><tr><th>Nom</th><th>Statut</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="hint" style="margin-top:14px">Accès réservé aux administrateurs. Une matière archivée n'est plus proposée mais reste sur les anciennes demandes. Deux matières ne peuvent pas avoir le même nom.</p>`);
-}
 
-actions["add-subject-admin"] = () => {
-  openDialog("Ajouter une matière", "", (name) => {
-    if (nameTaken(name)) return "Une matière porte déjà ce nom.";
-    state.subjects.push({ name, archived: false });
-  }, render);
-};
+  const reload = async () => { subjects = await get("/api/admin/matieres"); render(); };
+  const find = (t) => subjects.find((s) => s.id === Number(t.dataset.id));
 
-actions["rename-subject"] = (t) => {
-  const subject = state.subjects[+t.dataset.i];
-  openDialog("Renommer la matière", subject.name, (name) => {
-    if (nameTaken(name, subject)) return "Une matière porte déjà ce nom.";
-    const old = subject.name;
-    subject.name = name;
-    state.user.subjects = state.user.subjects.map((x) => (x === old ? name : x));
-  }, render);
-};
+  actions["add-subject-admin"] = () => openDialog("Ajouter une matière", "", async (name) => {
+    await post("/api/admin/matieres", { name });
+    await reload();
+    toast("Matière ajoutée.");
+  });
 
-actions["toggle-archive"] = (t) => {
-  const subject = state.subjects[+t.dataset.i];
-  subject.archived = !subject.archived;
-  save();
-  render();
-  toast(subject.archived ? "Matière archivée." : "Matière restaurée.");
-};
+  actions["rename-subject"] = (t) => {
+    const s = find(t);
+    openDialog("Renommer la matière", s.name, async (name) => {
+      await patch(`/api/admin/matieres/${s.id}`, { name });
+      await reload();
+      toast("Matière renommée.");
+    });
+  };
 
-render();
+  actions["toggle-archive"] = async (t) => {
+    const s = find(t);
+    if (!(await attempt(() => patch(`/api/admin/matieres/${s.id}`, { archived: !s.archived })))) return;
+    await reload();
+    toast(s.archived ? "Matière restaurée." : "Matière archivée.");
+  };
+
+  try { await reload(); } catch (e) { toast(e.message); }
+})();

@@ -1,5 +1,7 @@
-# Données générées par le serveur de messagerie (comptes et messages)
+# Données générées par le serveur (comptes, demandes, messages, e-mails de démo)
 data.json
+data.old.json
+data.json.tmp
 
 # Dépendances et journaux
 node_modules/

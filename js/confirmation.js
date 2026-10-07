@@ -1,12 +1,22 @@
 "use strict";
 
-$("#app").innerHTML = `
-  <div class="auth-page"><div class="auth-card">
-    <div class="logo" style="color:var(--blue)">${icon("mail")}</div>
-    <h1>Confirmez votre compte</h1>
-    <p>Bonjour,</p>
-    <p>Pour activer votre compte, cliquez sur le lien ci-dessous :</p>
-    <a class="btn btn-primary btn-block" href="connexion.html?confirme=1">Confirmer mon compte</a>
-    <p class="hint">Ce lien est valable 24 heures.</p>
-    <p class="hint">Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.</p>
-  </div></div>`;
+(async () => {
+  const card = (ico, color, title, body) => {
+    $("#app").innerHTML = `
+      <div class="auth-page"><div class="auth-card">
+        <div class="logo" style="color:${color}">${icon(ico)}</div>
+        <h1>${title}</h1>
+        <p class="sub">${body}</p>
+        <a class="btn btn-primary btn-block" href="connexion.html">Se connecter</a>
+        ${authFooter}
+      </div></div>`;
+  };
+
+  card("mail", "var(--blue)", "Confirmation en cours…", "Un instant.");
+  try {
+    await post("/api/auth/confirm", { token: queryParam("token") || "" });
+    card("check", "var(--green)", "Compte activé", "Votre adresse est confirmée : vous pouvez maintenant vous connecter.");
+  } catch (e) {
+    card("lock", "var(--red)", "Lien invalide", `${esc(e.message)} Le lien a déjà servi ou a plus de 24 heures : recréez un compte pour recevoir un nouvel e-mail.`);
+  }
+})();
