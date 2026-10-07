@@ -1,0 +1,16 @@
+# Données générées par le serveur de messagerie (comptes et messages)
+data.json
+
+# Dépendances et journaux
+node_modules/
+npm-debug.log*
+*.log
+
+# Variables d'environnement
+.env
+.env.*
+
+# Fichiers système et éditeurs
+.DS_Store
+.vscode/
+.idea/
